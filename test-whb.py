@@ -400,7 +400,7 @@ class VideoObjectTracker:
         curr_vehicles = []
         else_vehicles = []
         first_distances = self.first_distances
-        outputs = self.model.process_frame(frame, slice_height=520, slice_width=520)
+        outputs = self.model.process_frame(frame, slice_height=720, slice_width=720)
         if outputs is None:
             return frame
         if len(outputs) != 0:

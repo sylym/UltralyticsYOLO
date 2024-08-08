@@ -193,7 +193,7 @@ def batched_greedy_nmm(object_predictions_as_tensor: torch.tensor, match_metric:
 
 def GreedyNMMPostprocess(object_predictions, match_threshold, match_metric):
     object_predictions_as_tensor = object_predictions.clone().detach()
-    keep_to_merge_list = greedy_nmm(
+    keep_to_merge_list = batched_greedy_nmm(
         object_predictions_as_tensor,
         match_threshold=match_threshold,
         match_metric=match_metric,

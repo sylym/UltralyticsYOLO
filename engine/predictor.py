@@ -128,10 +128,10 @@ def draw_boxes(image, boxes):
         return
     for box in boxes:
         x1, y1, x2, y2, conf, cls, track_id = box
-        cv2.rectangle(image, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
         label = f"{int(cls)}: {conf:.2f}"
-        cv2.putText(image, label, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
         if track_id is not None:
+            cv2.rectangle(image, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+            cv2.putText(image, label, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
             label = f"ID: {int(track_id)}"
             cv2.putText(image, label, (int(x1), int(y2) + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
 
@@ -149,7 +149,7 @@ class YOLOVideoProcessor:
                       overlap_height_ratio=0.2, overlap_width_ratio=0.2, device='cuda', use_float16=True):
         orig_shape = frame.shape
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        chunks, coords, scale_factor = split_image(frame, slice_height, slice_width, 2, 3, auto_overlap,
+        chunks, coords, scale_factor = split_image(frame, slice_height, slice_width, 1, 2, auto_overlap,
                                                    overlap_height_ratio, overlap_width_ratio, device, use_float16,
                                                    (640, 640))
         results = self.model.predict(chunks)
