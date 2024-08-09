@@ -11,6 +11,5 @@ if __name__ == "__main__":
     # 将模型导出为TensorRT格式
     model.export(
         format="engine",
-        half=True,
         batch=3
     )

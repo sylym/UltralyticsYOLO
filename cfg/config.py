@@ -17,7 +17,7 @@ MQTT_PORT = getenv["MQTT_PORT"] if getenv("MQTT_PORT") else 42417
 MQTT_USERNAME = getenv("MQTT_USER") if getenv("MQTT_USER") else "admin"
 MQTT_PASSWORD = getenv("MQTT_PASS") if getenv("MQTT_PASS") else "public"
 
-MODEL_PATH = "./models/yolov10m2.engine"
+MODEL_PATH = "./models/yolov8.engine"
 TRACKER_CONFIG = (
     getenv("TRACKER_CONFIG")
     if getenv("TRACKER_CONFIG")

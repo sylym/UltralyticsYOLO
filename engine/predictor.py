@@ -146,7 +146,7 @@ class YOLOVideoProcessor:
         self.tracker = tracker_map[cfg.tracker_type](args=cfg, frame_rate=30)
 
     def process_frame(self, frame, slice_height=640, slice_width=640, auto_overlap=True,
-                      overlap_height_ratio=0.2, overlap_width_ratio=0.2, device='cuda', use_float16=True):
+                      overlap_height_ratio=0.2, overlap_width_ratio=0.2, device='cuda', use_float16=False):
         orig_shape = frame.shape
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         chunks, coords, scale_factor = split_image(frame, slice_height, slice_width, 1, 2, auto_overlap,
