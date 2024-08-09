@@ -96,6 +96,17 @@ CHNlabel_color = [
     ["解除限速标志", (0, 255, 0)],
 ]
 
+class_mapping_dict = {
+        3: 2,
+        6: 5, 7: 5,
+        9: 8,
+        12: 11, 13: 11, 14: 11,
+        17: 16,
+        19: 18,
+        25: 24, 26: 24, 27: 24, 28: 24, 29: 24,
+        32: 31, 33: 31, 34: 31, 35: 31, 36: 31
+    }
+
 def cv2AddChineseText(img, text, position, textColor=(0, 255, 0), textSize=10):
     if (isinstance(img, np.ndarray)):  # 判断是否OpenCV图片类型
         img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
@@ -400,7 +411,7 @@ class VideoObjectTracker:
         curr_vehicles = []
         else_vehicles = []
         first_distances = self.first_distances
-        outputs = self.model.process_frame(frame, slice_height=720, slice_width=720)
+        outputs = self.model.process_frame(frame, slice_height=720, slice_width=720, class_mapping=class_mapping_dict)
         if outputs is None:
             return frame
         if len(outputs) != 0:

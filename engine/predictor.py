@@ -1,13 +1,15 @@
 import os
 import time
+
 import cv2
-from ultralytics import YOLO
 import torch
 import torch.nn.functional as F
+from ultralytics import YOLO
+from ultralytics.engine.results import Boxes
 from ultralytics.trackers import BYTETracker, BOTSORT
 from ultralytics.utils import IterableSimpleNamespace, yaml_load
 from ultralytics.utils.checks import check_yaml
-from ultralytics.engine.results import Boxes
+
 from .nms import GreedyNMMPostprocess
 
 
@@ -82,7 +84,7 @@ def split_image(image, slice_height, slice_width, height_slices_num, width_slice
     return chunks, coords, scale_factors
 
 
-def adjust_boxes(boxes, chunk_coords, scale_factors, is_original=False):
+def adjust_boxes(boxes, chunk_coords, scale_factors, is_original=False, class_mapping=None):
     adjusted_boxes = []
     x_offset, y_offset = chunk_coords
     scale_factor_height, scale_factor_width = scale_factors
@@ -95,15 +97,20 @@ def adjust_boxes(boxes, chunk_coords, scale_factors, is_original=False):
         y1 = y1 / scale_factor_height + y_offset
         x2 = x2 / scale_factor_width + x_offset
         y2 = y2 / scale_factor_height + y_offset
+        class_num = box.cls[0].clone()
+
+        if class_mapping:
+            class_num_int = class_mapping.get(int(class_num), int(class_num))
+            class_num = torch.tensor(class_num_int, device=class_num.device)
 
         if is_original:
             score = box.conf[0].clone()
             score += 0.2
             if score > 1.0:
                 score = torch.tensor(1.0, device=score.device)
-            adjusted_boxes.append([x1, y1, x2, y2, score, box.cls[0].clone()])
+            adjusted_boxes.append([x1, y1, x2, y2, score, class_num])
         else:
-            adjusted_boxes.append([x1, y1, x2, y2, box.conf[0], box.cls[0]])
+            adjusted_boxes.append([x1, y1, x2, y2, box.conf[0], class_num])
 
     return adjusted_boxes
 
@@ -145,8 +152,8 @@ class YOLOVideoProcessor:
         tracker_map = {"bytetrack": BYTETracker, "botsort": BOTSORT}
         self.tracker = tracker_map[cfg.tracker_type](args=cfg, frame_rate=30)
 
-    def process_frame(self, frame, slice_height=640, slice_width=640, auto_overlap=True,
-                      overlap_height_ratio=0.2, overlap_width_ratio=0.2, device='cuda', use_float16=False):
+    def process_frame(self, frame, slice_height=640, slice_width=640, auto_overlap=True, overlap_height_ratio=0.2,
+                      overlap_width_ratio=0.2, device='cuda', use_float16=False, class_mapping=None):
         orig_shape = frame.shape
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         chunks, coords, scale_factor = split_image(frame, slice_height, slice_width, 1, 2, auto_overlap,
@@ -157,9 +164,11 @@ class YOLOVideoProcessor:
 
         for index, result in enumerate(results):
             if index != 0:
-                adjusted_boxes = adjust_boxes(result.boxes, coords[index - 1], scale_factor[index])
+                adjusted_boxes = adjust_boxes(result.boxes, coords[index - 1], scale_factor[index],
+                                              class_mapping=class_mapping)
             else:
-                adjusted_boxes = adjust_boxes(result.boxes, (0, 0), scale_factor[index], is_original=True)
+                adjusted_boxes = adjust_boxes(result.boxes, (0, 0), scale_factor[index], is_original=True,
+                                              class_mapping=class_mapping)
             all_boxes.extend(adjusted_boxes)
 
         if len(all_boxes) > 0:
@@ -171,7 +180,7 @@ class YOLOVideoProcessor:
         return None
 
     def process_video(self, video_path, slice_height=None, slice_width=None, auto_overlap=False,
-                      overlap_height_ratio=0.2, overlap_width_ratio=0.2, output_resolution=None):
+                      overlap_height_ratio=0.2, overlap_width_ratio=0.2, output_resolution=None, class_mapping=None):
         cap = cv2.VideoCapture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
         delay = int(1000 / fps)
@@ -188,7 +197,7 @@ class YOLOVideoProcessor:
                 frame = cv2.resize(frame, output_resolution)
 
             processed_frame = self.process_frame(frame, slice_height, slice_width, auto_overlap,
-                                                 overlap_height_ratio, overlap_width_ratio)
+                                                 overlap_height_ratio, overlap_width_ratio, class_mapping=class_mapping)
             draw_boxes(frame, processed_frame)
 
             # 计算FPS
@@ -210,6 +219,16 @@ class YOLOVideoProcessor:
 
 
 if __name__ == "__main__":
-    processor = YOLOVideoProcessor("ckpts/yolov10m2.engine", "bytetrack.yaml")
-    processor.process_video("DJI_20240411112959_0002_Z（60米40度3倍.mp4", slice_height=520, slice_width=520,
-                            auto_overlap=True, output_resolution=(1280, 720))
+    class_mapping_dict = {
+        3: 2,
+        6: 5, 7: 5,
+        9: 8,
+        12: 11, 13: 11, 14: 11,
+        17: 16,
+        19: 18,
+        25: 24, 26: 24, 27: 24, 28: 24, 29: 24,
+        32: 31, 33: 31, 34: 31, 35: 31, 36: 31
+    }
+    processor = YOLOVideoProcessor("ckpts/yolov8.engine", "./UltralyticsYOLO/cfg/bytetrack.yaml")
+    processor.process_video("2025.mp4", slice_height=720, slice_width=720,
+                            auto_overlap=True, output_resolution=(1280, 720), class_mapping=class_mapping_dict)
