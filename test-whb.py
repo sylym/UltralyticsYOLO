@@ -10,25 +10,13 @@ import time
 from datetime import timedelta
 import cv2
 import numpy as np
-from PIL import ImageDraw, ImageFont, Image
 from minio import Minio
 from minio.error import S3Error
 
 from cfg.config import TRACKER_CONFIG, MODEL_PATH, MQTT_HOST, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD
 from engine.mqtt import MQTTClientHandler
 from engine.predictor import YOLOVideoProcessor
-
-
-def xyxy_to_xywh(x_min, y_min, x_max, y_max):
-    """ " Calculates the relative bounding box from absolute pixel values."""
-    bbox_w = abs(x_max - x_min)
-    bbox_h = abs(y_max - y_min)
-    x_c = x_min + bbox_w / 2
-    y_c = y_min + bbox_h / 2
-    w = bbox_w
-    h = bbox_h
-    return x_c, y_c, w, h
-
+from utils.utils import cv2AddChineseText
 
 label_set = [
     [0, 1, 2, 3, 4],
@@ -105,18 +93,7 @@ class_mapping_dict = {
         32: 31, 33: 31, 34: 31, 35: 31, 36: 31
     }
 
-def cv2AddChineseText(img, text, position, textColor=(0, 255, 0), textSize=10):
-    if (isinstance(img, np.ndarray)):  # 判断是否OpenCV图片类型
-        img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-    # 创建一个可以在给定图像上绘图的对象
-    draw = ImageDraw.Draw(img)
-    # 字体的格式
-    fontStyle = ImageFont.truetype(
-        "assets/simsun.ttc", textSize, encoding="utf-8")
-    # 绘制文本
-    draw.text(position, text, textColor, font=fontStyle)
-    # 转换回OpenCV格式
-    return cv2.cvtColor(np.asarray(img), cv2.COLOR_RGB2BGR)
+
 
 class VideoObjectTracker:
     def __init__(
