@@ -8,16 +8,14 @@ import subprocess
 import threading
 import time
 from datetime import timedelta
-import uuid
 import cv2
 import numpy as np
 from PIL import ImageDraw, ImageFont, Image
-from gmqtt import Client as MQTTClient
 from minio import Minio
 from minio.error import S3Error
 
-from cfg.config import (TRACKER_CONFIG, MODEL_PATH, MQTT_HOST, MQTT_PASSWORD,
-                    MQTT_PORT, MQTT_USERNAME, RTMP_INPUT, RTMP_OUTPUT)
+from cfg.config import TRACKER_CONFIG, MODEL_PATH, MQTT_HOST, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD
+from engine.mqtt import MQTTClientHandler
 from engine.predictor import YOLOVideoProcessor
 
 
@@ -130,7 +128,6 @@ class VideoObjectTracker:
         source=None,
         zoom=None,
         flight_id=None,
-        is_live_stream=False,
         uav_height=None,
         angle=None,
         rtmp_url=None,
@@ -139,15 +136,11 @@ class VideoObjectTracker:
 
     ):
         self.model = YOLOVideoProcessor(model_path, tracker_config)
-        self.names = None  # 检测目标的名称
         self.source = source  # 可以是视频文件路径或者实时流的URL
         self.output_path = output_path
-        self.is_live_stream = is_live_stream
         self.uav_height = uav_height
         self.angle = angle
         self.video = None
-        self.flc1_id_counter = 0  # 锥桶ID
-        self.flc3_id_counter = 0  # 导流板ID
         self.output_video = None
         self.target_id_counter = 0
         self.flc_id_count = [0 for i in range(len(label_color))]  # 保存每个类别的id数量
@@ -192,12 +185,9 @@ class VideoObjectTracker:
         self.sent_events = {i: set() for i in range(len(label_color))}
 
     def open_video(self):
-        if self.is_live_stream:
-            self.video = cv2.VideoCapture(self.source + "?timeout=5000000")
-            self.video.set(cv2.CAP_PROP_BUFFERSIZE, 3)
-            self.video.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000000)
-        else:
-            self.video = cv2.VideoCapture("0618——50m.MP4")
+        self.video = cv2.VideoCapture(self.source + "?timeout=5000000")
+        self.video.set(cv2.CAP_PROP_BUFFERSIZE, 3)
+        self.video.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000000)
         if not self.video.isOpened():
             raise ValueError("Cannot open video source")
         self.stop_event.clear()
@@ -776,42 +766,11 @@ class VideoObjectTracker:
         print("Detection stopped.")
 
 
-def setup_mqtt_callbacks(client):
-    def on_connect(client, flags, rc, properties):
-        print("Connected with result code " + str(rc))
-
-    def on_disconnect(client, packet, exc=None):
-        print("Disconnected")
-
-    def on_publish(client, mid, qos, properties):
-        print(f"Message {mid} has been published with QoS {qos}")
-
-    client.on_connect = on_connect
-    client.on_disconnect = on_disconnect
-    client.on_publish = on_publish
-
-
-# MQTT服务器信息
-HOST = "59.46.115.177"
-PORT = 42417
-USERNAME = "admin"
-PASSWORD = "public"
-
-
-async def main():
-    mqtt_client = MQTTClient(str(uuid.uuid1()))
-    setup_mqtt_callbacks(mqtt_client)
-    mqtt_client.set_auth_credentials(MQTT_USERNAME, MQTT_PASSWORD)
-
-    def on_connect(client, flags, rc, properties):
-        print("Connected to MQTT Server")
-        client.subscribe("/ATS/yunying/task/ai/in/FLXJ", qos=0)
-
+if __name__ == "__main__":
     def on_message(client, topic, payload, qos, properties):
         print(f"Received message: {payload.decode()} on topic {topic}")
         data = json.loads(payload.decode())
         if "param" in data and "resource" in data:
-           # pass
             tracker.update_parameters(
                 source=data["resource"],
                 uav_height=data["param"]["height"],
@@ -825,35 +784,17 @@ async def main():
         elif "flightId" in data and len(data) == 1:
             tracker.stop_detection()
 
-    def on_publish(client, mid, qos, properties):
-        print(f"Message {mid} has been published with QoS {qos}")
+    client_handler = MQTTClientHandler(MQTT_HOST, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD, on_message_callback=on_message)
 
-    mqtt_client.on_connect = on_connect
-    mqtt_client.on_message = on_message
-    mqtt_client.on_publish = on_publish
-
-    await mqtt_client.connect(MQTT_HOST, MQTT_PORT)
     tracker = VideoObjectTracker(
         model_path=MODEL_PATH,
-        # model_path='/home/wxy/yolov5/best.pt',
         tracker_config=TRACKER_CONFIG,
-        #source="",  # 初始为空，将通过MQTT更新
         output_path="",
-        mqtt_client=mqtt_client,
-        is_live_stream=True,
-        #rtmp_url="",
+        mqtt_client=client_handler.client,
         uav_height=80,
         angle=40,
         zoom=2,
         flight_id='4719894fbb634729bd657a69f7963840',
     )
-    #tracker.generate_new_paths()
-    #tracker.open_video()
-    #asyncio.create_task(tracker.process_frames())
 
-    # 保持MQTT客户端连接状态
-    await asyncio.Event().wait()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(client_handler.run())
