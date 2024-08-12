@@ -361,7 +361,7 @@ class VideoObjectTracker:
                         (0, 255, 0),
                         2,
                     )
-            if self.second_detection_time != 0:
+            if self.second_detection_time != 0 and self.second_detection_time > self.first_detection_time:
                 first_time = self.second_detection_time - self.first_detection_time
                 print(f'first_length: {first_time * 5:.2f} m')
                 self.first_length = round(first_time * 5)
@@ -374,11 +374,12 @@ class VideoObjectTracker:
                         (0, 255, 0),
                         2,
                     )
-            if self.third_detection_time != 0:
-                second_time = self.third_detection_time - self.second_detection_time
-                print(f'second_length: {second_time * 5:.2f} m')
-                self.second_length = round(second_time * 5)
-                cv2.putText(
+            if self.third_detection_time != 0 and self.third_detection_time > self.second_detection_time:
+                if self.second_detection_time == 0:
+                    second_time = self.third_detection_time - self.first_detection_time
+                    print(f'second_length: {second_time * 5:.2f} m')
+                    self.second_length = round(second_time * 5)
+                    cv2.putText(
                         frame,
                         f'second_length:{self.second_length} m',
                         (960, 200),
@@ -387,11 +388,25 @@ class VideoObjectTracker:
                         (0, 255, 0),
                         2,
                     )
-            if self.forth_detection_time != 0:
-                third_time = self.third_detection_time - self.second_detection_time
-                print(f'third_length: {third_time * 5:.2f} m')
-                self.third_length = round(third_time * 5)
-                cv2.putText(
+                else:
+                    second_time = self.third_detection_time - self.second_detection_time
+                    print(f'second_length: {second_time * 5:.2f} m')
+                    self.second_length = round(second_time * 5)
+                    cv2.putText(
+                            frame,
+                            f'second_length:{self.second_length} m',
+                            (960, 200),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            1,
+                            (0, 255, 0),
+                            2,
+                        )
+            if self.forth_detection_time != 0 and self.forth_detection_time > self.third_detection_time:
+                if self.third_detection_time == 0:
+                    third_time = self.forth_detection_time - self.second_detection_time
+                    print(f'third_length: {third_time * 5:.2f} m')
+                    self.third_length = round(third_time * 5)
+                    cv2.putText(
                         frame,
                         f'third_length:{self.third_length} m',
                         (960, 250),
@@ -400,7 +415,32 @@ class VideoObjectTracker:
                         (0, 255, 0),
                         2,
                     )
-
+                elif self.second_detection_time == 0:
+                    third_time = self.forth_detection_time - self.first_detection_time
+                    print(f'third_length: {third_time * 5:.2f} m')
+                    self.third_length = round(third_time * 5)
+                    cv2.putText(
+                            frame,
+                            f'third_length:{self.third_length} m',
+                            (960, 250),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            1,
+                            (0, 255, 0),
+                            2,
+                        )
+                else:
+                    third_time = self.forth_detection_time - self.third_detection_time
+                    print(f'third_length: {third_time * 5:.2f} m')
+                    self.third_length = round(third_time * 5)
+                    cv2.putText(
+                        frame,
+                        f'third_length:{self.third_length} m',
+                        (960, 250),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1,
+                        (0, 255, 0),
+                        2,
+                    )
             self.stream_frame_to_rtmp(frame)
             # self.save_frame_to_output(frame)
             print(f"Processing frame {current_frame} of {num_frames}")
