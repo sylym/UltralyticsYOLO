@@ -34,8 +34,10 @@ class VideoCapture:
         self.isstop = False
         self.q = queue.Queue()
         self.capture = cv2.VideoCapture(self.URL)
-        if not self.capture.isOpened():
-            raise ValueError(f"Unable to open video source {self.URL}")
+        while not self.capture.isOpened() and not self.isstop:
+            print(f"Unable to open video source {self.URL}. Retrying...")
+            time.sleep(1)
+            self.capture = cv2.VideoCapture(self.URL)
         self.receive_thread = threading.Thread(target=self.readframe)
         self.process_thread = threading.Thread(target=self.process_frames, args=(custom_frame_processor,))
         self.receive_thread.start()
@@ -55,9 +57,19 @@ class VideoCapture:
     def readframe(self):
         while not self.isstop:
             try:
+                start = time.time()
                 ok, frame = self.capture.read()
                 if ok:
                     self.q.put(frame)
+                else:
+                    end = time.time()
+                    if end - start > 20:
+                        self.capture.release()
+                        self.capture = cv2.VideoCapture(self.URL)
+                        while not self.capture.isOpened() and not self.isstop:
+                            print(f"Unable to open video source {self.URL}. Retrying...")
+                            time.sleep(1)
+                            self.capture = cv2.VideoCapture(self.URL)
             except Exception as e:
                 print(f"Exception occurred: {e}")
         self.capture.release()
