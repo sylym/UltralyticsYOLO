@@ -95,7 +95,7 @@ class VideoCapture:
             except BrokenPipeError:
                 print("Broken pipe error occurred!")
                 time.sleep(1)
-        ffmpeg_process.stdin.close()
+        ffmpeg_process.kill()
         ffmpeg_process.communicate()
         print("processing stopped!")
 
@@ -114,8 +114,7 @@ if __name__ == '__main__':
         data = json.loads(payload.decode())
         if "param" in data and "resource" in data:
             global cap
-            cap = VideoCapture("rtmp://12.30.4.137:1935/live/aitest", "rtmp://12.30.4.137:1935/live/dsfdsfsfs",
-                               frame_processor)
+            cap = VideoCapture(data["resource"], data["result"], frame_processor)
         elif "flightId" in data and len(data) == 1:
             if cap is not None:
                 cap.release()
