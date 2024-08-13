@@ -11,19 +11,21 @@ from cfg.config import MQTT_HOST, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD
 from engine.mqtt import MQTTClientHandler
 
 
-def init_rtmp_stream(width, height, rtmp_url):
+def init_rtmp_stream(width, height, rtmp_url, fps=30):
     ffmpeg_command = ['ffmpeg',
+                      '-re',
                       '-y',
                       '-f', 'rawvideo',
                       '-vcodec', 'rawvideo',
                       '-pix_fmt', 'bgr24',
                       '-s', "{}x{}".format(width, height),
-                      '-r', '30',
+                      '-r', str(fps),
                       '-i', '-',
                       '-c:v', 'libx264',
                       '-pix_fmt', 'yuv420p',
                       '-preset', 'ultrafast',
                       '-f', 'flv',
+                      '-flvflags', 'no_duration_filesize',
                       rtmp_url]
     return subprocess.Popen(ffmpeg_command, stdin=subprocess.PIPE), ffmpeg_command
 
@@ -50,6 +52,7 @@ class VideoCapture:
         capture = cv2.VideoCapture(url)
         while True:
             if capture.isOpened() or self.isstop:
+                print("Video source opened!")
                 break
             print(f"Unable to open video source {url}. Retrying...")
             time.sleep(1)
@@ -71,6 +74,7 @@ class VideoCapture:
                         capture.release()
                         capture = cv2.VideoCapture(url)
                         if capture.isOpened() or self.isstop:
+                            print("Video source opened!")
                             break
         capture.release()
         print("reading stopped!")
@@ -85,6 +89,7 @@ class VideoCapture:
             frame = frame_callback(frame)
             if ffmpeg_process.poll() is not None:
                 ffmpeg_process = subprocess.Popen(ffmpeg_command, stdin=subprocess.PIPE)
+                print("FFMPEG process restarted!")
             try:
                 ffmpeg_process.stdin.write(frame.tobytes())
             except BrokenPipeError:
@@ -100,6 +105,7 @@ if __name__ == '__main__':
 
 
     def frame_processor(frame):
+        time.sleep(0.04)
         return frame
 
 
