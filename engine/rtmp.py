@@ -30,23 +30,15 @@ def init_rtmp_stream(width, height, rtmp_url):
 
 class VideoCapture:
     def __init__(self, url, rtmp_url, custom_frame_processor):
-        self.URL = url
         self.isstop = False
         self.q = queue.Queue()
-        self.capture = cv2.VideoCapture(self.URL)
-        while not self.capture.isOpened() and not self.isstop:
-            print(f"Unable to open video source {self.URL}. Retrying...")
-            time.sleep(1)
-            self.capture = cv2.VideoCapture(self.URL)
-        self.receive_thread = threading.Thread(target=self.readframe)
-        self.process_thread = threading.Thread(target=self.process_frames, args=(custom_frame_processor,))
+        self.init_event = threading.Event()
+        self.size = None
+        self.receive_thread = threading.Thread(target=self.readframe, args=(url,))
+        self.process_thread = threading.Thread(target=self.process_frames, args=(custom_frame_processor, rtmp_url))
         self.receive_thread.start()
         self.process_thread.start()
         print('VideoCapture started!')
-
-        (self.ffmpeg_process, self.ffmpeg_command) = init_rtmp_stream(int(self.capture.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                                                                      int(self.capture.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-                                                                      rtmp_url)
 
     def release(self, custom_release=None):
         self.isstop = True
@@ -54,42 +46,52 @@ class VideoCapture:
             custom_release()
         print('VideoCapture stopped!')
 
-    def readframe(self):
+    def readframe(self, url):
+        capture = cv2.VideoCapture(url)
+        while True:
+            if capture.isOpened() or self.isstop:
+                break
+            print(f"Unable to open video source {url}. Retrying...")
+            time.sleep(1)
+            capture.release()
+            capture = cv2.VideoCapture(url)
+        self.size = (int(capture.get(cv2.CAP_PROP_FRAME_WIDTH)), int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+        self.init_event.set()
         while not self.isstop:
-            try:
-                start = time.time()
-                ok, frame = self.capture.read()
-                if ok:
-                    self.q.put(frame)
-                else:
-                    end = time.time()
-                    if end - start > 20:
-                        self.capture.release()
-                        self.capture = cv2.VideoCapture(self.URL)
-                        while not self.capture.isOpened() and not self.isstop:
-                            print(f"Unable to open video source {self.URL}. Retrying...")
-                            time.sleep(1)
-                            self.capture = cv2.VideoCapture(self.URL)
-            except Exception as e:
-                print(f"Exception occurred: {e}")
-        self.capture.release()
+            start = time.time()
+            ok, frame = capture.read()
+            if ok:
+                self.q.put(frame)
+            else:
+                end = time.time()
+                if end - start > 20:
+                    while True:
+                        print(f"Unable to open video source {url}. Retrying...")
+                        time.sleep(1)
+                        capture.release()
+                        capture = cv2.VideoCapture(url)
+                        if capture.isOpened() or self.isstop:
+                            break
+        capture.release()
         print("reading stopped!")
 
-    def process_frames(self, frame_callback):
+    def process_frames(self, frame_callback, rtmp_url):
+        self.init_event.wait()
+        (ffmpeg_process, ffmpeg_command) = init_rtmp_stream(self.size[0], self.size[1], rtmp_url)
         while not self.isstop or not self.q.empty():
             if self.q.empty():
                 continue
             frame = self.q.get_nowait()
             frame = frame_callback(frame)
-            if self.ffmpeg_process.poll() is not None:
-                self.ffmpeg_process = subprocess.Popen(self.ffmpeg_command, stdin=subprocess.PIPE)
+            if ffmpeg_process.poll() is not None:
+                ffmpeg_process = subprocess.Popen(ffmpeg_command, stdin=subprocess.PIPE)
             try:
-                self.ffmpeg_process.stdin.write(frame.tobytes())
+                ffmpeg_process.stdin.write(frame.tobytes())
             except BrokenPipeError:
                 print("Broken pipe error occurred!")
                 time.sleep(1)
-        self.ffmpeg_process.stdin.close()
-        self.ffmpeg_process.communicate()
+        ffmpeg_process.stdin.close()
+        ffmpeg_process.communicate()
         print("processing stopped!")
 
 
@@ -106,7 +108,8 @@ if __name__ == '__main__':
         data = json.loads(payload.decode())
         if "param" in data and "resource" in data:
             global cap
-            cap = VideoCapture(data["resource"], data["result"], frame_processor)
+            cap = VideoCapture("rtmp://12.30.4.137:1935/live/aitest", "rtmp://12.30.4.137:1935/live/dsfdsfsfs",
+                               frame_processor)
         elif "flightId" in data and len(data) == 1:
             if cap is not None:
                 cap.release()
