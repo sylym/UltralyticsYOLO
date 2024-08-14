@@ -1,6 +1,7 @@
 import asyncio
 import json
 import queue
+import select
 import subprocess
 import threading
 import time
@@ -11,7 +12,7 @@ from cfg.config import MQTT_HOST, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD
 from engine.mqtt import MQTTClientHandler
 
 
-def init_rtmp_stream(width, height, rtmp_url, fps=30):
+def init_rtmp_command(width, height, rtmp_url, fps=30):
     ffmpeg_command = ['ffmpeg',
                       '-re',
                       '-y',
@@ -27,7 +28,13 @@ def init_rtmp_stream(width, height, rtmp_url, fps=30):
                       '-f', 'flv',
                       '-flvflags', 'no_duration_filesize',
                       rtmp_url]
-    return subprocess.Popen(ffmpeg_command, stdin=subprocess.PIPE), ffmpeg_command
+    return ffmpeg_command
+
+
+def init_rtmp_stream(ffmpeg_command):
+    process = subprocess.Popen(ffmpeg_command, stdin=subprocess.PIPE, bufsize=0)
+    _, writable, _ = select.select([], [process.stdin], [], 0)
+    return process, writable
 
 
 class VideoCapture:
@@ -55,7 +62,6 @@ class VideoCapture:
                 print("Video source opened!")
                 break
             print(f"Unable to open video source {url}. Retrying...")
-            time.sleep(1)
             capture.release()
             capture = cv2.VideoCapture(url)
         self.size = (int(capture.get(cv2.CAP_PROP_FRAME_WIDTH)), int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)))
@@ -70,7 +76,6 @@ class VideoCapture:
                 if end - start > 20:
                     while True:
                         print(f"Unable to open video source {url}. Retrying...")
-                        time.sleep(1)
                         capture.release()
                         capture = cv2.VideoCapture(url)
                         if capture.isOpened() or self.isstop:
@@ -81,20 +86,25 @@ class VideoCapture:
 
     def process_frames(self, frame_callback, rtmp_url):
         self.init_event.wait()
-        (ffmpeg_process, ffmpeg_command) = init_rtmp_stream(self.size[0], self.size[1], rtmp_url)
+        ffmpeg_command = init_rtmp_command(self.size[0], self.size[1], rtmp_url)
+        ffmpeg_process, writable = init_rtmp_stream(ffmpeg_command)
         while not self.isstop or not self.q.empty():
             if self.q.empty():
                 continue
             frame = self.q.get_nowait()
             frame = frame_callback(frame)
-            if ffmpeg_process.poll() is not None:
-                ffmpeg_process = subprocess.Popen(ffmpeg_command, stdin=subprocess.PIPE)
-                print("FFMPEG process restarted!")
-            try:
-                ffmpeg_process.stdin.write(frame.tobytes())
-            except BrokenPipeError:
-                print("Broken pipe error occurred!")
-                time.sleep(1)
+            while not self.isstop:
+                if ffmpeg_process.poll() is not None:
+                    ffmpeg_process.kill()
+                    ffmpeg_process.communicate()
+                    ffmpeg_process, writable = init_rtmp_stream(ffmpeg_command)
+                    print("FFMPEG process restarted!")
+                if ffmpeg_process.stdin in writable:
+                    try:
+                        ffmpeg_process.stdin.write(frame.tobytes())
+                        break
+                    except BrokenPipeError:
+                        print("Broken pipe error occurred!")
         ffmpeg_process.kill()
         ffmpeg_process.communicate()
         print("processing stopped!")
