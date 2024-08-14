@@ -27,6 +27,7 @@ def init_rtmp_command(width, height, rtmp_url, fps=30):
                       '-preset', 'ultrafast',
                       '-f', 'flv',
                       '-flvflags', 'no_duration_filesize',
+                      '-rw_timeout', '1000000',
                       rtmp_url]
     return ffmpeg_command
 
