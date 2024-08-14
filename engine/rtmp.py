@@ -23,6 +23,7 @@ def init_rtmp_command(width, height, rtmp_url, fps=30):
                       '-r', str(fps),
                       '-i', '-',
                       '-c:v', 'libx264',
+                      '-b:v', '2400k',
                       '-pix_fmt', 'yuv420p',
                       '-preset', 'ultrafast',
                       '-f', 'flv',
@@ -71,7 +72,7 @@ class VideoCapture:
             start = time.time()
             ok, frame = capture.read()
             if ok:
-                self.q.put(frame)
+                self.q.put((frame, int(capture.get(cv2.CAP_PROP_POS_FRAMES)), capture.get(cv2.CAP_PROP_FPS)))
             else:
                 end = time.time()
                 if end - start > 20:
@@ -117,7 +118,7 @@ if __name__ == '__main__':
 
     def frame_processor(frame):
         time.sleep(0.04)
-        return frame
+        return frame[0]
 
 
     def on_message(client, topic, payload, qos, properties):
