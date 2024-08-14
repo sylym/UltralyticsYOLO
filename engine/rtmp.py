@@ -93,7 +93,7 @@ class VideoCapture:
                 continue
             frame = self.q.get_nowait()
             frame = frame_callback(frame)
-            while not self.isstop:
+            while not self.isstop or not self.q.empty():
                 if ffmpeg_process.poll() is not None:
                     ffmpeg_process.kill()
                     ffmpeg_process.communicate()
