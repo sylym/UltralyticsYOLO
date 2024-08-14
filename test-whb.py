@@ -1,10 +1,8 @@
 import asyncio
 import datetime
 import json
-import math
 import os
 import queue
-import subprocess
 import threading
 import time
 from datetime import timedelta
@@ -16,6 +14,7 @@ from minio.error import S3Error
 from cfg.config import TRACKER_CONFIG, MODEL_PATH, MQTT_HOST, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD
 from engine.mqtt import MQTTClientHandler
 from engine.predictor import YOLOVideoProcessor
+from engine.rtmp import VideoCapture
 from utils.utils import cv2AddChineseText
 
 label_set = [
@@ -101,7 +100,6 @@ class VideoObjectTracker:
         model_path,
         tracker_config,
         output_path,
-        mqtt_client,
         source=None,
         zoom=None,
         flight_id=None,
@@ -117,7 +115,6 @@ class VideoObjectTracker:
         self.output_path = output_path
         self.uav_height = uav_height
         self.angle = angle
-        self.video = None
         self.output_video = None
         self.target_id_counter = 0
         self.flc_id_count = [0 for i in range(len(label_color))]  # 保存每个类别的id数量
@@ -127,11 +124,8 @@ class VideoObjectTracker:
         self.detection_threshold = 0.7
         self.first_distances = {}
         self.distance_threshold = 50
-        self.mqtt_client = mqtt_client
         self.flight_id = None
         self.rtmp_url = rtmp_url
-        self.width = None
-        self.height = None
         self.fps = None
         self.zoom = zoom
         self.ffmpeg_process = None
@@ -160,82 +154,7 @@ class VideoObjectTracker:
         self.max_retry_time = max_retry_time
 
         self.sent_events = {i: set() for i in range(len(label_color))}
-
-    def open_video(self):
-        self.video = cv2.VideoCapture(self.source + "?timeout=5000000")
-        self.video.set(cv2.CAP_PROP_BUFFERSIZE, 3)
-        self.video.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000000)
-        if not self.video.isOpened():
-            raise ValueError("Cannot open video source")
-        self.stop_event.clear()
-        self.fps = (
-            self.video.get(cv2.CAP_PROP_FPS) or 30
-        )  # 如果从实时流读取可能获取不到FPS，可以设定一个默认值
-        self.width = int(self.video.get(cv2.CAP_PROP_FRAME_WIDTH))
-        self.height = int(self.video.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        self.VFOV = self.calculate_vfov()
-        self.init_rtmp_stream()
-        self.init_output_video()
-
-    def calculate_vfov(self):
-        focal_length = 9 * self.zoom
-        sensor_height = 5.66
-        vfov = 2 * math.degrees(math.atan(sensor_height / (2 * focal_length)))
-        return vfov
-
-    def init_rtmp_stream(self):
-        ffmpeg_command = [
-            "ffmpeg",
-            "-hwaccel",
-            "cuda",
-            '-re',
-            '-threads',
-            '5',
-            "-f",
-            "rawvideo",
-            "-pix_fmt",
-            "bgr24",
-            "-s",
-            f"{self.width}x{self.height}",
-            "-r",
-            str(30),
-            "-i",
-            "-",
-            "-vcodec",
-            # "libx264",
-            "h264_nvenc",
-            "-bf",
-            "0",
-            "-pix_fmt",
-            "yuv420p",
-            "-g",
-            "30",
-            "-f",
-            "flv",
-            self.rtmp_url,
-            #"rtmp://59.46.115.177:1935/live/aiOutTest"
-        ]
-        self.ffmpeg_process = subprocess.Popen(ffmpeg_command, stdin=subprocess.PIPE)
-
-    def init_output_video(self):
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        self.output_video = cv2.VideoWriter(
-            self.output_path, fourcc, self.fps, (self.width, self.height)
-        )
-
-    def save_frame_to_output(self, frame):
-        self.output_video.write(frame)
-
-    def stream_frame_to_rtmp(self, frame):
-        self.ffmpeg_process.stdin.write(frame.tobytes())
-
-    def publish_event(self, event_info: dict):
-        topic = f"/ATS/yunying/task/ai/out/FLXJ/{self.flight_id}"
-        try:
-            result = self.mqtt_client.publish(topic, json.dumps(event_info), qos=0)
-            print(f"Publish result: {result}")
-        except Exception as e:
-            print(f"Failed to publish event: {e}")
+        self.frame_height = 0
 
     def stream_frame_to_minio_publish(self, screenshot_path, image_name, event_info):
         if_uploaded = False
@@ -258,8 +177,7 @@ class VideoObjectTracker:
         if if_uploaded:
             topic = f"/ATS/yunying/task/ai/out/FLXJ/{self.flight_id}"
             try:
-                result = self.mqtt_client.publish(topic, json.dumps(event_info), qos=0)
-                print(f"Publish result: {result}")
+                client_handler.publish(topic, json.dumps(event_info))
             except Exception as e:
                 print(f"Failed to publish event: {e}")
 
@@ -281,72 +199,63 @@ class VideoObjectTracker:
         ]
         return consecutive_distances
 
-    async def process_frames(self):
-        retry_time = 0
-        while True:
-            ret, frame = self.video.read()
-            # print(f"第一帧大小：{frame.shape}")
-            # if not ret:
-            #     break
-            print(ret)
-            if not ret:
-                if retry_time >= self.max_retry_time:
-                    print("Exceeded max retry time. Stopping.")
-                    break
-                try:
-                    retry_time += self.retry_interval
-                    time.sleep(self.retry_interval)
-                    self.video = cv2.VideoCapture(self.source)
-                    print(f"Failed to read frame. Retrying in {self.retry_interval} seconds...")
-                except Exception as e:
-                    print('reconnect failed')
-                finally:
-                    continue
-            retry_time = 0
+    def process_frames(self, info):
+        (frame, current_frame, fps) = info
+        self.im0 = frame.copy()
+        self.frame_height = frame.shape[0]
+        self.fps = fps or 30
+        frame = self.process_frame(
+            frame, self.frame_height, current_frame, self.fps
+        )
+        #frame = cv2.resize(frame, (1920, 1080))
 
-            self.im0 = frame.copy()
-            current_frame = int(self.video.get(cv2.CAP_PROP_POS_FRAMES))
-            num_frames = int(self.video.get(cv2.CAP_PROP_FRAME_COUNT))
-            fps = self.video.get(cv2.CAP_PROP_FPS) or 30
-            frame = self.process_frame(
-                frame, self.video.get(cv2.CAP_PROP_FRAME_HEIGHT), current_frame, fps
-            )
-            #frame = cv2.resize(frame, (1920, 1080))
-
-            # 计算距离
-            if self.first_detection_time != 0:
-                end_time = current_frame / self.fps
-                total_time = end_time - self.first_detection_time
-                print(f'total_length: {total_time * 5:.2f} m')
-                self.total_length = round(total_time * 5)
+        # 计算距离
+        if self.first_detection_time != 0:
+            end_time = current_frame / self.fps
+            total_time = end_time - self.first_detection_time
+            print(f'total_length: {total_time * 5:.2f} m')
+            self.total_length = round(total_time * 5)
+            cv2.putText(
+                    frame,
+                    f'total_length:{self.total_length} m',
+                    (960, 100),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1,
+                    (0, 255, 0),
+                    2,
+                )
+        if self.second_detection_time != 0 and self.second_detection_time > self.first_detection_time:
+            first_time = self.second_detection_time - self.first_detection_time
+            print(f'first_length: {first_time * 5:.2f} m')
+            self.first_length = round(first_time * 5)
+            cv2.putText(
+                    frame,
+                    f'first_length:{self.first_length} m',
+                    (960, 150),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1,
+                    (0, 255, 0),
+                    2,
+                )
+        if self.third_detection_time != 0 and self.third_detection_time > self.second_detection_time:
+            if self.second_detection_time == 0:
+                second_time = self.third_detection_time - self.first_detection_time
+                print(f'second_length: {second_time * 5:.2f} m')
+                self.second_length = round(second_time * 5)
                 cv2.putText(
-                        frame,
-                        f'total_length:{self.total_length} m',
-                        (960, 100),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1,
-                        (0, 255, 0),
-                        2,
-                    )
-            if self.second_detection_time != 0 and self.second_detection_time > self.first_detection_time:
-                first_time = self.second_detection_time - self.first_detection_time
-                print(f'first_length: {first_time * 5:.2f} m')
-                self.first_length = round(first_time * 5)
+                    frame,
+                    f'second_length:{self.second_length} m',
+                    (960, 200),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1,
+                    (0, 255, 0),
+                    2,
+                )
+            else:
+                second_time = self.third_detection_time - self.second_detection_time
+                print(f'second_length: {second_time * 5:.2f} m')
+                self.second_length = round(second_time * 5)
                 cv2.putText(
-                        frame,
-                        f'first_length:{self.first_length} m',
-                        (960, 150),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1,
-                        (0, 255, 0),
-                        2,
-                    )
-            if self.third_detection_time != 0 and self.third_detection_time > self.second_detection_time:
-                if self.second_detection_time == 0:
-                    second_time = self.third_detection_time - self.first_detection_time
-                    print(f'second_length: {second_time * 5:.2f} m')
-                    self.second_length = round(second_time * 5)
-                    cv2.putText(
                         frame,
                         f'second_length:{self.second_length} m',
                         (960, 200),
@@ -355,25 +264,25 @@ class VideoObjectTracker:
                         (0, 255, 0),
                         2,
                     )
-                else:
-                    second_time = self.third_detection_time - self.second_detection_time
-                    print(f'second_length: {second_time * 5:.2f} m')
-                    self.second_length = round(second_time * 5)
-                    cv2.putText(
-                            frame,
-                            f'second_length:{self.second_length} m',
-                            (960, 200),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            1,
-                            (0, 255, 0),
-                            2,
-                        )
-            if self.forth_detection_time != 0 and self.forth_detection_time > self.third_detection_time:
-                if self.third_detection_time == 0:
-                    third_time = self.forth_detection_time - self.second_detection_time
-                    print(f'third_length: {third_time * 5:.2f} m')
-                    self.third_length = round(third_time * 5)
-                    cv2.putText(
+        if self.forth_detection_time != 0 and self.forth_detection_time > self.third_detection_time:
+            if self.third_detection_time == 0:
+                third_time = self.forth_detection_time - self.second_detection_time
+                print(f'third_length: {third_time * 5:.2f} m')
+                self.third_length = round(third_time * 5)
+                cv2.putText(
+                    frame,
+                    f'third_length:{self.third_length} m',
+                    (960, 250),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1,
+                    (0, 255, 0),
+                    2,
+                )
+            elif self.second_detection_time == 0:
+                third_time = self.forth_detection_time - self.first_detection_time
+                print(f'third_length: {third_time * 5:.2f} m')
+                self.third_length = round(third_time * 5)
+                cv2.putText(
                         frame,
                         f'third_length:{self.third_length} m',
                         (960, 250),
@@ -382,36 +291,20 @@ class VideoObjectTracker:
                         (0, 255, 0),
                         2,
                     )
-                elif self.second_detection_time == 0:
-                    third_time = self.forth_detection_time - self.first_detection_time
-                    print(f'third_length: {third_time * 5:.2f} m')
-                    self.third_length = round(third_time * 5)
-                    cv2.putText(
-                            frame,
-                            f'third_length:{self.third_length} m',
-                            (960, 250),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            1,
-                            (0, 255, 0),
-                            2,
-                        )
-                else:
-                    third_time = self.forth_detection_time - self.third_detection_time
-                    print(f'third_length: {third_time * 5:.2f} m')
-                    self.third_length = round(third_time * 5)
-                    cv2.putText(
-                        frame,
-                        f'third_length:{self.third_length} m',
-                        (960, 250),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1,
-                        (0, 255, 0),
-                        2,
-                    )
-            self.stream_frame_to_rtmp(frame)
-            # self.save_frame_to_output(frame)
-            print(f"Processing frame {current_frame} of {num_frames}")
-            await asyncio.sleep(0)
+            else:
+                third_time = self.forth_detection_time - self.third_detection_time
+                print(f'third_length: {third_time * 5:.2f} m')
+                self.third_length = round(third_time * 5)
+                cv2.putText(
+                    frame,
+                    f'third_length:{self.third_length} m',
+                    (960, 250),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1,
+                    (0, 255, 0),
+                    2,
+                )
+        return frame
 
     def process_frame(self, frame, frame_height, current_frame, fps):
         frame_third = frame_height / 3
@@ -652,9 +545,6 @@ class VideoObjectTracker:
                         target=self.stream_frame_to_minio_publish,
                         args=(screenshot_path, object_name, event_info),
                     ).start()
-                    # threading.Thread(
-                    # target=self.publish_event, kwargs={'event_info': event_info}
-                    # ).start()
                     self.sent_events[vehicle["class_id"]].add(vehicle["target_id"])
             else:
                 distance_meters = first_distances[distance_key]
@@ -694,17 +584,7 @@ class VideoObjectTracker:
 
     def get_ratio(self):
         equal_length = 35
-        return equal_length / int(self.video.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-    def close(self):
-        if self.video is not None:
-            self.video.release()
-        if self.output_video is not None:
-            self.output_video.release()
-        if self.ffmpeg_process is not None:
-            self.ffmpeg_process.stdin.close()
-            self.ffmpeg_process.wait()
-        cv2.destroyAllWindows()
+        return equal_length / int(self.frame_height)
 
     def generate_new_paths(self):
         timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
@@ -728,9 +608,7 @@ class VideoObjectTracker:
         )
 
     def stop_detection(self):
-        self.close()
         self.stop_event.set()
-        self.video = None
         self.output_video = None
         self.prev_vehicles = []
         self.target_id_counter = 0
@@ -744,10 +622,20 @@ class VideoObjectTracker:
 
 
 if __name__ == "__main__":
+
+    cap = None
+
+    def frame_processor(frame):
+        frame = tracker.process_frames(frame)
+        return frame
+
+
     def on_message(client, topic, payload, qos, properties):
         print(f"Received message: {payload.decode()} on topic {topic}")
         data = json.loads(payload.decode())
         if "param" in data and "resource" in data:
+            global cap
+            cap = VideoCapture(data["resource"], data["result"], frame_processor)
             tracker.update_parameters(
                 source=data["resource"],
                 uav_height=data["param"]["height"],
@@ -756,22 +644,21 @@ if __name__ == "__main__":
                 flight_id=data["flightId"],
                 rtmp_url=data["result"],
             )
-            tracker.open_video()
-            asyncio.create_task(tracker.process_frames())
         elif "flightId" in data and len(data) == 1:
-            tracker.stop_detection()
+            if cap is not None:
+                cap.release(tracker.stop_detection())
 
-    client_handler = MQTTClientHandler(MQTT_HOST, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD, on_message_callback=on_message)
 
+    client_handler = MQTTClientHandler(MQTT_HOST, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD,
+                                       on_message_callback=on_message)
     tracker = VideoObjectTracker(
         model_path=MODEL_PATH,
         tracker_config=TRACKER_CONFIG,
         output_path="",
-        mqtt_client=client_handler.client,
         uav_height=80,
         angle=40,
         zoom=2,
         flight_id='4719894fbb634729bd657a69f7963840',
     )
-
     asyncio.run(client_handler.run())
+

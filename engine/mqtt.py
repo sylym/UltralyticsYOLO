@@ -36,7 +36,7 @@ class MQTTClientHandler:
         self.client.set_auth_credentials(self.username, self.password)
         await self.client.connect(self.host, self.port)
 
-    async def publish(self, topic, payload, qos=0):
+    def publish(self, topic, payload, qos=0):
         self.client.publish(topic, payload, qos=qos)
 
     async def run(self):
