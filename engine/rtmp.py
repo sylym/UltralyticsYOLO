@@ -23,7 +23,6 @@ def init_rtmp_command(width, height, rtmp_url, fps=30):
                       '-r', str(fps),
                       '-i', '-',
                       '-c:v', 'libx264',
-                      '-b:v', '2400k',
                       '-pix_fmt', 'yuv420p',
                       '-preset', 'ultrafast',
                       '-f', 'flv',

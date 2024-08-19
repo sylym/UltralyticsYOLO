@@ -1,20 +1,14 @@
-import asyncio
 import datetime
 import json
 import os
 import queue
 import threading
-import time
 from datetime import timedelta
 import cv2
 import numpy as np
 from minio import Minio
 from minio.error import S3Error
-
-from cfg.config import TRACKER_CONFIG, MODEL_PATH, MQTT_HOST, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD
-from engine.mqtt import MQTTClientHandler
 from engine.predictor import YOLOVideoProcessor
-from engine.rtmp import VideoCapture
 from utils.utils import cv2AddChineseText
 
 label_set = [
@@ -82,41 +76,33 @@ CHNlabel_color = [
 ]
 
 class_mapping_dict = {
-        3: 2,
-        6: 5, 7: 5,
-        9: 8,
-        12: 11, 13: 11, 14: 11,
-        17: 16,
-        19: 18,
-        25: 24, 26: 24, 27: 24, 28: 24, 29: 24,
-        32: 31, 33: 31, 34: 31, 35: 31, 36: 31
-    }
-
+    3: 2,
+    6: 5, 7: 5,
+    9: 8,
+    12: 11, 13: 11, 14: 11,
+    17: 16,
+    19: 18,
+    25: 24, 26: 24, 27: 24, 28: 24, 29: 24,
+    32: 31, 33: 31, 34: 31, 35: 31, 36: 31
+}
 
 
 class VideoObjectTracker:
     def __init__(
-        self,
-        model_path,
-        tracker_config,
-        output_path,
-        source=None,
-        zoom=None,
-        flight_id=None,
-        uav_height=None,
-        angle=None,
-        rtmp_url=None,
-        retry_interval=5,
-        max_retry_time=120,
-
+            self,
+            model_path,
+            tracker_config,
+            output_path,
+            zoom=None,
+            uav_height=None,
+            angle=None,
+            retry_interval=5,
+            max_retry_time=120,
     ):
         self.model = YOLOVideoProcessor(model_path, tracker_config)
-        self.source = source  # 可以是视频文件路径或者实时流的URL
         self.output_path = output_path
         self.uav_height = uav_height
         self.angle = angle
-        self.output_video = None
-        self.target_id_counter = 0
         self.flc_id_count = [0 for i in range(len(label_color))]  # 保存每个类别的id数量
         self.known_target_id = [
             {} for i in range(len(label_color))
@@ -125,11 +111,9 @@ class VideoObjectTracker:
         self.first_distances = {}
         self.distance_threshold = 50
         self.flight_id = None
-        self.rtmp_url = rtmp_url
         self.fps = None
         self.zoom = zoom
-        self.ffmpeg_process = None
-        self.stop_event = threading.Event()
+        self.mqtt_client = None
 
         self.minio_frame_queue = queue.Queue(maxsize=60)
         self.minio_client = Minio(
@@ -177,7 +161,7 @@ class VideoObjectTracker:
         if if_uploaded:
             topic = f"/ATS/yunying/task/ai/out/FLXJ/{self.flight_id}"
             try:
-                client_handler.publish(topic, json.dumps(event_info))
+                self.mqtt_client.publish(topic, json.dumps(event_info))
             except Exception as e:
                 print(f"Failed to publish event: {e}")
 
@@ -187,11 +171,11 @@ class VideoObjectTracker:
         vehicle_positions = np.array([v["positison"] for v in curr_vehicles])
         distances = np.sqrt(
             (
-                (
-                    vehicle_positions[:, np.newaxis, :]
-                    - vehicle_positions[np.newaxis, :, :]
-                )
-                ** 2
+                    (
+                            vehicle_positions[:, np.newaxis, :]
+                            - vehicle_positions[np.newaxis, :, :]
+                    )
+                    ** 2
             ).sum(axis=2)
         )
         consecutive_distances = distances[
@@ -216,27 +200,27 @@ class VideoObjectTracker:
             print(f'total_length: {total_time * 5:.2f} m')
             self.total_length = round(total_time * 5)
             cv2.putText(
-                    frame,
-                    f'total_length:{self.total_length} m',
-                    (960, 100),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1,
-                    (0, 255, 0),
-                    2,
-                )
+                frame,
+                f'total_length:{self.total_length} m',
+                (960, 100),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0, 255, 0),
+                2,
+            )
         if self.second_detection_time != 0 and self.second_detection_time > self.first_detection_time:
             first_time = self.second_detection_time - self.first_detection_time
             print(f'first_length: {first_time * 5:.2f} m')
             self.first_length = round(first_time * 5)
             cv2.putText(
-                    frame,
-                    f'first_length:{self.first_length} m',
-                    (960, 150),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1,
-                    (0, 255, 0),
-                    2,
-                )
+                frame,
+                f'first_length:{self.first_length} m',
+                (960, 150),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0, 255, 0),
+                2,
+            )
         if self.third_detection_time != 0 and self.third_detection_time > self.second_detection_time:
             if self.second_detection_time == 0:
                 second_time = self.third_detection_time - self.first_detection_time
@@ -256,14 +240,14 @@ class VideoObjectTracker:
                 print(f'second_length: {second_time * 5:.2f} m')
                 self.second_length = round(second_time * 5)
                 cv2.putText(
-                        frame,
-                        f'second_length:{self.second_length} m',
-                        (960, 200),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1,
-                        (0, 255, 0),
-                        2,
-                    )
+                    frame,
+                    f'second_length:{self.second_length} m',
+                    (960, 200),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1,
+                    (0, 255, 0),
+                    2,
+                )
         if self.forth_detection_time != 0 and self.forth_detection_time > self.third_detection_time:
             if self.third_detection_time == 0:
                 third_time = self.forth_detection_time - self.second_detection_time
@@ -283,14 +267,14 @@ class VideoObjectTracker:
                 print(f'third_length: {third_time * 5:.2f} m')
                 self.third_length = round(third_time * 5)
                 cv2.putText(
-                        frame,
-                        f'third_length:{self.third_length} m',
-                        (960, 250),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1,
-                        (0, 255, 0),
-                        2,
-                    )
+                    frame,
+                    f'third_length:{self.third_length} m',
+                    (960, 250),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1,
+                    (0, 255, 0),
+                    2,
+                )
             else:
                 third_time = self.forth_detection_time - self.third_detection_time
                 print(f'third_length: {third_time * 5:.2f} m')
@@ -395,69 +379,69 @@ class VideoObjectTracker:
                 if "FLA3" in vehicle["class_label"]:
                     distance = self.first_length * 100
                     event_info = {
-                            "event": "meta",
-                            "type": vehicle["class_label"],
-                            "isWarning": 0,
-                            "time": time_ms,
-                            "message": None,
-                            "info": {
-                                "id": vehicle["target_id"],
-                                "lon": 125.16,
-                                "lat": 41.72,
-                                "distance": distance,
-                                "same-distance":None,
-                            },
-                            "url": object_name,
+                        "event": "meta",
+                        "type": vehicle["class_label"],
+                        "isWarning": 0,
+                        "time": time_ms,
+                        "message": None,
+                        "info": {
+                            "id": vehicle["target_id"],
+                            "lon": 125.16,
+                            "lat": 41.72,
+                            "distance": distance,
+                            "same-distance": None,
+                        },
+                        "url": object_name,
                     }
                 elif "FLA6" in vehicle["class_label"]:
                     distance = self.second_length * 100
                     event_info = {
-                            "event": "meta",
-                            "type": vehicle["class_label"],
-                            "isWarning": 0,
-                            "time": time_ms,
-                            "message": None,
-                            "info": {
-                                "id": vehicle["target_id"],
-                                "lon": 125.16,
-                                "lat": 41.72,
-                                "distance": distance,
-                                "same-distance":None,
-                            },
-                            "url": object_name,
+                        "event": "meta",
+                        "type": vehicle["class_label"],
+                        "isWarning": 0,
+                        "time": time_ms,
+                        "message": None,
+                        "info": {
+                            "id": vehicle["target_id"],
+                            "lon": 125.16,
+                            "lat": 41.72,
+                            "distance": distance,
+                            "same-distance": None,
+                        },
+                        "url": object_name,
                     }
                 elif "FLB1" in vehicle["class_label"]:
                     distance = self.third_length * 100
                     event_info = {
-                            "event": "meta",
-                            "type": vehicle["class_label"],
-                            "isWarning": 0,
-                            "time": time_ms,
-                            "message": None,
-                            "info": {
-                                "id": vehicle["target_id"],
-                                "lon": 125.16,
-                                "lat": 41.72,
-                                "distance": distance,
-                                "same-distance":None,
-                            },
-                            "url": object_name,
+                        "event": "meta",
+                        "type": vehicle["class_label"],
+                        "isWarning": 0,
+                        "time": time_ms,
+                        "message": None,
+                        "info": {
+                            "id": vehicle["target_id"],
+                            "lon": 125.16,
+                            "lat": 41.72,
+                            "distance": distance,
+                            "same-distance": None,
+                        },
+                        "url": object_name,
                     }
                 else:
                     event_info = {
-                            "event": "meta",
-                            "type": vehicle["class_label"],
-                            "isWarning": 0,
-                            "time": time_ms,
-                            "message": None,
-                            "info": {
-                                "id": vehicle["target_id"],
-                                "lon": 125.16,
-                                "lat": 41.72,
-                                "distance": None,
-                                "same-distance":None,
-                            },
-                            "url": object_name,
+                        "event": "meta",
+                        "type": vehicle["class_label"],
+                        "isWarning": 0,
+                        "time": time_ms,
+                        "message": None,
+                        "info": {
+                            "id": vehicle["target_id"],
+                            "lon": 125.16,
+                            "lat": 41.72,
+                            "distance": None,
+                            "same-distance": None,
+                        },
+                        "url": object_name,
                     }
                 threading.Thread(
                     target=self.stream_frame_to_minio_publish,
@@ -495,8 +479,8 @@ class VideoObjectTracker:
                 color1 = (0, 0, 255) if distance_meters > 400 else (0, 255, 0)
                 text_x = max(int(vehicle["xmax"]), int(next_vehicle["xmax"])) + 50
                 text_y = (
-                    min(int(vehicle["center_y"]), int(next_vehicle["center_y"]))
-                    + 10
+                        min(int(vehicle["center_y"]), int(next_vehicle["center_y"]))
+                        + 10
                 )  # 基于两个检测框的较上方中心点向上偏移10个像素
                 # 确保文本位置不会超出图像边界
                 # text_x = min(text_x, frame.shape[1] - text_size[0] - 10)
@@ -522,8 +506,8 @@ class VideoObjectTracker:
                 cv2.imwrite(screenshot_path, frame)
                 object_name = f"{self.flight_id}/{image_name}"
                 if (
-                    vehicle["target_id"]
-                    not in self.sent_events[vehicle["class_id"]]
+                        vehicle["target_id"]
+                        not in self.sent_events[vehicle["class_id"]]
                 ):
                     distance = round(distance_meters * 100)
                     event_info = {
@@ -565,8 +549,8 @@ class VideoObjectTracker:
                 color1 = (0, 0, 255) if distance_meters > 400 else (0, 255, 0)
                 text_x = max(int(vehicle["xmax"]), int(next_vehicle["xmax"])) + 50
                 text_y = (
-                    min(int(vehicle["center_y"]), int(next_vehicle["center_y"]))
-                    + 10
+                        min(int(vehicle["center_y"]), int(next_vehicle["center_y"]))
+                        + 10
                 )  # 基于两个检测框的较上方中心点向上偏移10个像素
                 # 确保文本位置不会超出图像边界
                 #text_x = min(text_x, frame.shape[1] - text_size[0] - 10)
@@ -595,23 +579,18 @@ class VideoObjectTracker:
             f"Generated new paths: output_path={self.output_path}, screenshot_folder={self.screenshot_folder}"
         )
 
-    def update_parameters(self, source, uav_height, angle, zoom, flight_id, rtmp_url):
-        self.source = source
+    def update_parameters(self, uav_height, angle, zoom, flight_id, mqtt_client):
         self.uav_height = uav_height / 10
         self.angle = -angle / 10
         self.zoom = zoom
         self.flight_id = flight_id
-        self.rtmp_url = rtmp_url  # 更新 RTMP 地址
         self.generate_new_paths()  # 生成新的输出路径和截屏路径
+        self.mqtt_client = mqtt_client
         print(
-            f"Updated parameters: source={self.source}, uav_height={self.uav_height}, angle={self.angle}, flight_if={self.flight_id}"
+            f"Updated parameters: uav_height={self.uav_height}, angle={self.angle}, flight_if={self.flight_id}"
         )
 
     def stop_detection(self):
-        self.stop_event.set()
-        self.output_video = None
-        self.prev_vehicles = []
-        self.target_id_counter = 0
         self.first_distances = {}
         self.sent_events = {i: set() for i in range(len(label_color))}
         self.first_detection_time = 0
@@ -619,46 +598,3 @@ class VideoObjectTracker:
         self.third_detection_time = 0
         self.forth_detection_time = 0
         print("Detection stopped.")
-
-
-if __name__ == "__main__":
-
-    cap = None
-
-    def frame_processor(frame):
-        frame = tracker.process_frames(frame)
-        return frame
-
-
-    def on_message(client, topic, payload, qos, properties):
-        print(f"Received message: {payload.decode()} on topic {topic}")
-        data = json.loads(payload.decode())
-        if "param" in data and "resource" in data:
-            global cap
-            cap = VideoCapture(data["resource"], data["result"], frame_processor)
-            tracker.update_parameters(
-                source=data["resource"],
-                uav_height=data["param"]["height"],
-                angle=data["param"]["pith"],
-                zoom=data["param"]["zoom"],
-                flight_id=data["flightId"],
-                rtmp_url=data["result"],
-            )
-        elif "flightId" in data and len(data) == 1:
-            if cap is not None:
-                cap.release(tracker.stop_detection())
-
-
-    client_handler = MQTTClientHandler(MQTT_HOST, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD,
-                                       on_message_callback=on_message)
-    tracker = VideoObjectTracker(
-        model_path=MODEL_PATH,
-        tracker_config=TRACKER_CONFIG,
-        output_path="",
-        uav_height=80,
-        angle=40,
-        zoom=2,
-        flight_id='4719894fbb634729bd657a69f7963840',
-    )
-    asyncio.run(client_handler.run())
-
