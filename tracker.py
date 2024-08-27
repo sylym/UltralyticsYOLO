@@ -132,7 +132,7 @@ class VideoObjectTracker:
         self.total_length = 0
         self.first_length = 0
         self.second_length = 0
-        self.thrid_length = 0
+        self.third_length = 0
 
         self.retry_interval = retry_interval
         self.max_retry_time = max_retry_time
