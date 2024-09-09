@@ -8,11 +8,11 @@ import time
 
 import cv2
 
-from cfg.config import MQTT_HOST, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD
+from cfg.config import MQTT_HOST, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD, FPS, GOP_SIZE
 from engine.mqtt import MQTTClientHandler
 
 
-def init_rtmp_command(width, height, rtmp_url, fps=30):
+def init_rtmp_command(width, height, rtmp_url, fps=FPS, gop_size=GOP_SIZE):
     ffmpeg_command = ['ffmpeg',
                       '-re',
                       '-y',
@@ -25,6 +25,7 @@ def init_rtmp_command(width, height, rtmp_url, fps=30):
                       '-c:v', 'libx264',
                       '-pix_fmt', 'yuv420p',
                       '-preset', 'ultrafast',
+                      '-g', str(gop_size),
                       '-f', 'flv',
                       '-flvflags', 'no_duration_filesize',
                       '-rw_timeout', '1000000',

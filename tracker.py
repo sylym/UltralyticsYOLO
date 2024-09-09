@@ -10,6 +10,7 @@ from minio import Minio
 from minio.error import S3Error
 from engine.predictor import YOLOVideoProcessor
 from utils.utils import cv2AddChineseText
+from cfg.config import FPS, GOP_SIZE
 
 label_set = [
     [0, 1, 2, 3, 4],
@@ -365,7 +366,11 @@ class VideoObjectTracker:
         # distances = self.calculate_distances(curr_vehicles)
         for i in range(len(else_vehicles) - 1):
             vehicle = else_vehicles[i]
-            time_ms = round((current_frame / fps) * 1000, 2)
+            current_ms = round((current_frame / fps) * 1000, 2)
+            gop_ms = (GOP_SIZE / FPS) * 1000
+            time_ms = current_ms - gop_ms
+            if time_ms < 0:
+                time_ms = 0
             if vehicle["target_id"] not in self.sent_events[vehicle["class_id"]]:
                 screenshot_path = os.path.join(
                     self.screenshot_folder,
@@ -494,7 +499,11 @@ class VideoObjectTracker:
                     color1,
                     2,
                 )
-                time_ms = round((current_frame / fps) * 1000, 2)
+                current_ms = round((current_frame / fps) * 1000, 2)
+                gop_ms = (GOP_SIZE / FPS) * 1000
+                time_ms = current_ms - gop_ms
+                if time_ms < 0:
+                    time_ms = 0
                 # timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
                 screenshot_path = os.path.join(
                     self.screenshot_folder,

@@ -40,6 +40,7 @@ def run_videotracker(data, stop_event):
     cap.process_thread.join()
     cap.receive_thread.join()
     wait_thread.join()
+    send_complete_message(data["flightId"])
 
 
 def on_message(client, topic, payload, qos, properties):
@@ -59,6 +60,13 @@ def on_message(client, topic, payload, qos, properties):
             stop_event.set()
             del stop_event_dict[flight_id]
 
+def send_complete_message(flightId):
+    topic = f"/ATS/yunying/task/ai/out/FLXJ"
+    message = json.dumps({"flightId": flightId})
+    try:
+        client_handler.publish(topic, message)
+    except Exception as e:
+        print(f"Failed to publish complete message: {e}")
 
 if __name__ == "__main__":
     client_handler = MQTTClientHandler(MQTT_HOST, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD,
