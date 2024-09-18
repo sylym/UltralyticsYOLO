@@ -188,7 +188,7 @@ class VideoObjectTracker:
         (frame, current_frame, fps) = info
         self.im0 = frame.copy()
         self.frame_height = frame.shape[0]
-        self.fps = fps or 30
+        self.fps = FPS
         frame = self.process_frame(
             frame, self.frame_height, current_frame, self.fps
         )
