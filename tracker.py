@@ -65,7 +65,7 @@ CHNlabel_color = [
     ["注意交通引导人员", (153, 204, 255)],
     ["导向标志", (255, 102, 255)],
     ["安全员", (255, 51, 255)],
-    ["安全员", (255, 51, 255)],
+    ["安全警示牌", (255, 51, 255)],
     ["防撞车", (51, 153, 255)],
     ["汽车", (255, 153, 153)],
     ["汽车", (255, 153, 153)],
@@ -86,6 +86,25 @@ class_mapping_dict = {
     25: 24, 26: 24, 27: 24, 28: 24, 29: 24,
     32: 31, 33: 31, 34: 31, 35: 31, 36: 31
 }
+
+
+def check_positions(cone_positions, given_position, x_threshold):
+    x_given, y_given = given_position
+    has_above = False
+    has_below = False
+    x_min = x_given + x_threshold
+
+    for x, y in cone_positions:
+        if np.sqrt((x - x_given) ** 2 + (y - y_given) ** 2) <= x_threshold:
+            if y > y_given:
+                has_above = True
+            elif y < y_given:
+                has_below = True
+            if x < x_min:
+                x_min = x
+    if x_given > x_min:
+        return has_above and has_below
+    return False
 
 
 class VideoObjectTracker:
@@ -293,6 +312,7 @@ class VideoObjectTracker:
 
     def process_frame(self, frame, frame_height, current_frame, fps):
         frame_third = frame_height / 3
+        cone_positions = []
         curr_vehicles = []
         else_vehicles = []
         first_distances = self.first_distances
@@ -304,12 +324,20 @@ class VideoObjectTracker:
         else:
             return frame
         for output in outputs:
+            if new2old[int(output[5])] == 0:
+                xmin, ymin, xmax, ymax = map(int, output[:4])
+                center_x, center_y = (xmin + xmax) / 2, (ymin + ymax) / 2
+                cone_positions.append((center_x, center_y))
+        for output in outputs:
             xmin, ymin, xmax, ymax = map(int, output[:4])
             center_x, center_y = (xmin + xmax) / 2, (ymin + ymax) / 2
             class_id = new2old[int(output[5])]
             target_id = output[6]
             if target_id is None:
                 continue
+            if class_id == 10:
+                if not check_positions(cone_positions, (center_x, center_y), frame.shape[1]/6) is True:
+                    continue
 
             if target_id not in self.known_target_id[class_id].keys():
                 self.known_target_id[class_id][target_id] = len(
