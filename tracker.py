@@ -127,6 +127,8 @@ class VideoObjectTracker:
         self.known_target_id = [
             {} for i in range(len(label_color))
         ]  # 保存每个类别已知的id对应关系
+        # self.known_target_id = {}
+        # self.next_id = 0
         self.detection_threshold = 0.7
         self.first_distances = {}
         self.distance_threshold = 50
@@ -158,6 +160,9 @@ class VideoObjectTracker:
         self.max_retry_time = max_retry_time
 
         self.sent_events = {i: set() for i in range(len(label_color))}
+        self.event_infos = []
+        self.event_info_lock = threading.Lock()
+        self.json_file_path = 'event_infos.json'
         self.frame_height = 0
 
     def stream_frame_to_minio_publish(self, screenshot_path, image_name, event_info):
@@ -184,7 +189,13 @@ class VideoObjectTracker:
                 self.mqtt_client.publish(topic, json.dumps(event_info))
             except Exception as e:
                 print(f"Failed to publish event: {e}")
+        with self.event_info_lock:
+            self.save_event_info_to_json(event_info)
 
+    def save_event_info_to_json(self, event_info):
+        with open(self.json_file_path, 'a') as f:
+            json.dump(event_info, f)
+            f.write('\n')  # 写入换行符以便阅读
     def calculate_distances(self, curr_vehicles):
         if len(curr_vehicles) < 2:
             return []
@@ -344,17 +355,21 @@ class VideoObjectTracker:
                     self.known_target_id[class_id].keys()
                 )
                 self.flc_id_count[class_id] += 1
+            # if target_id not in self.known_target_id:
+            #     self.known_target_id[target_id] = self.next_id
+            #     self.next_id += 1
+            # target_id = self.known_target_id[target_id]
             target_id = self.known_target_id[class_id][target_id]
             class_label, color = label_color[class_id]
             CHNlabel, color2 = CHNlabel_color[class_id]
 
-            if "FLA1" in class_label and self.first_detection_time == 0:
+            if "FLA1" in class_label and self.first_detection_time == 0 and center_y >= self.frame_height/2 :
                 self.first_detection_time = current_frame / fps
-            if "FLA3" in class_label and self.second_detection_time == 0:
+            if "FLA3" in class_label and self.second_detection_time == 0 and center_y >= self.frame_height/2:
                 self.second_detection_time = current_frame / fps
-            if "FLA6" in class_label and self.third_detection_time == 0:
+            if "FLA6" in class_label and self.third_detection_time == 0 and center_y >= self.frame_height/2:
                 self.third_detection_time = current_frame / fps
-            if "FLB1" in class_label and self.forth_detection_time == 0:
+            if "FLB1" in class_label and self.forth_detection_time == 0 and center_y >= self.frame_height/2:
                 self.forth_detection_time = current_frame / fps
 
             cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), color, 2)
@@ -391,8 +406,7 @@ class VideoObjectTracker:
             frame = cv2AddChineseText(frame, f"{CHNlabel} _ {target_id}", (xmin, ymin - 10), (255, 0, 0), 10)
         curr_vehicles.sort(key=lambda v: v["center_y"])
         curr_vehicles = [v for v in curr_vehicles if v["center_y"] > frame_third]
-        # distances = self.calculate_distances(curr_vehicles)
-        for i in range(len(else_vehicles) - 1):
+        for i in range(len(else_vehicles)):
             vehicle = else_vehicles[i]
             current_ms = round((current_frame / fps) * 1000, 2)
             gop_ms = (GOP_SIZE / FPS) * 1000
@@ -634,4 +648,5 @@ class VideoObjectTracker:
         self.second_detection_time = 0
         self.third_detection_time = 0
         self.forth_detection_time = 0
+        self.next_id = 0
         print("Detection stopped.")
