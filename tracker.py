@@ -346,6 +346,12 @@ class VideoObjectTracker:
             target_id = output[6]
             if target_id is None:
                 continue
+            # 限制检测框的位置，避免检测框位于图像边缘
+            x_edge = frame.shape[1] / 23
+            y_edge = frame.shape[0] / 21
+            if center_x < x_edge or center_x > frame.shape[1] - x_edge or center_y < y_edge or center_y > frame.shape[0] - y_edge:
+                continue
+            # 限制小汽车和工程车的检测位置
             if class_id == 10 or class_id == 11:
                 if not check_positions(cone_positions, (center_x, center_y), frame.shape[1]/6) is True:
                     continue
