@@ -6,5 +6,5 @@ MQTT_PASSWORD = "public"
 FPS = 30
 GOP_SIZE = 60
 
-MODEL_PATH = "./models/yolov8_new.engine"
+MODEL_PATH = "./models/yolov8_new1.engine"
 TRACKER_CONFIG = "./cfg/bytetrack.yaml"

@@ -159,7 +159,7 @@ class YOLOVideoProcessor:
         chunks, coords, scale_factor = split_image(frame, slice_height, slice_width, 1, 2, auto_overlap,
                                                    overlap_height_ratio, overlap_width_ratio, device, use_float16,
                                                    (640, 640))
-        results = self.model.predict(chunks)
+        results = self.model.predict(chunks, conf=0.6)
         all_boxes = []
 
         for index, result in enumerate(results):
