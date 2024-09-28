@@ -189,8 +189,8 @@ class VideoObjectTracker:
                 self.mqtt_client.publish(topic, json.dumps(event_info))
             except Exception as e:
                 print(f"Failed to publish event: {e}")
-        with self.event_info_lock:
-            self.save_event_info_to_json(event_info)
+        # with self.event_info_lock:
+        #     self.save_event_info_to_json(event_info)
 
     def save_event_info_to_json(self, event_info):
         with open(self.json_file_path, 'a') as f:
@@ -346,7 +346,7 @@ class VideoObjectTracker:
             target_id = output[6]
             if target_id is None:
                 continue
-            if class_id == 10:
+            if class_id == 10 or class_id == 11:
                 if not check_positions(cone_positions, (center_x, center_y), frame.shape[1]/6) is True:
                     continue
 
@@ -355,10 +355,6 @@ class VideoObjectTracker:
                     self.known_target_id[class_id].keys()
                 )
                 self.flc_id_count[class_id] += 1
-            # if target_id not in self.known_target_id:
-            #     self.known_target_id[target_id] = self.next_id
-            #     self.next_id += 1
-            # target_id = self.known_target_id[target_id]
             target_id = self.known_target_id[class_id][target_id]
             class_label, color = label_color[class_id]
             CHNlabel, color2 = CHNlabel_color[class_id]
