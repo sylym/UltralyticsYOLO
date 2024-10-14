@@ -150,11 +150,14 @@ class VideoObjectTracker:
         self.second_detection_time = 0
         self.third_detection_time = 0
         self.forth_detection_time = 0
+        self.last_flc1_time = 0  # 记录最后一个FLC1的时间
+        self.first_flf1_time = 0  # 记录第一个FLF1的时间
 
         self.total_length = 0
         self.first_length = 0
         self.second_length = 0
         self.third_length = 0
+        self.last_length = 0
 
         self.retry_interval = retry_interval
         self.max_retry_time = max_retry_time
@@ -235,7 +238,7 @@ class VideoObjectTracker:
             cv2.putText(
                 frame,
                 f'total_length:{self.total_length} m',
-                (960, 100),
+                (60, 100),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 1,
                 (0, 255, 0),
@@ -248,7 +251,7 @@ class VideoObjectTracker:
             cv2.putText(
                 frame,
                 f'first_length:{self.first_length} m',
-                (960, 150),
+                (60, 150),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 1,
                 (0, 255, 0),
@@ -262,7 +265,7 @@ class VideoObjectTracker:
                 cv2.putText(
                     frame,
                     f'second_length:{self.second_length} m',
-                    (960, 200),
+                    (60, 200),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     1,
                     (0, 255, 0),
@@ -275,7 +278,7 @@ class VideoObjectTracker:
                 cv2.putText(
                     frame,
                     f'second_length:{self.second_length} m',
-                    (960, 200),
+                    (60, 200),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     1,
                     (0, 255, 0),
@@ -289,7 +292,7 @@ class VideoObjectTracker:
                 cv2.putText(
                     frame,
                     f'third_length:{self.third_length} m',
-                    (960, 250),
+                    (60, 250),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     1,
                     (0, 255, 0),
@@ -302,7 +305,7 @@ class VideoObjectTracker:
                 cv2.putText(
                     frame,
                     f'third_length:{self.third_length} m',
-                    (960, 250),
+                    (60, 250),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     1,
                     (0, 255, 0),
@@ -315,12 +318,25 @@ class VideoObjectTracker:
                 cv2.putText(
                     frame,
                     f'third_length:{self.third_length} m',
-                    (960, 250),
+                    (60, 250),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     1,
                     (0, 255, 0),
                     2,
                 )
+        if self.last_flc1_time != 0 and self.first_flf1_time != 0 and self.first_flf1_time > self.last_flc1_time:
+            last_time = self.first_flf1_time - self.last_flc1_time
+            print(f'last_length: {last_time * 5:.2f} m')
+            self.last_length = round(last_time * 5)
+            cv2.putText(
+                frame,
+                f'last_length:{self.last_length} m',
+                (60, 300),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0, 255, 0),
+                2,
+            )
         return frame
 
     def process_frame(self, frame, frame_height, current_frame, fps):
@@ -357,6 +373,10 @@ class VideoObjectTracker:
             if class_id == 10 or class_id == 11:
                 if not check_positions(cone_positions, (center_x, center_y), frame.shape[1]/6) is True:
                     continue
+            elif class_id == 0:
+                self.last_flc1_time = current_frame / fps
+            elif class_id == 16 and self.last_flc1_time > self.first_flf1_time:
+                self.first_flf1_time = current_frame / fps
 
             if target_id not in self.known_target_id[class_id].keys():
                 self.known_target_id[class_id][target_id] = len(
@@ -478,6 +498,54 @@ class VideoObjectTracker:
                             "lon": 125.16,
                             "lat": 41.72,
                             "distance": distance,
+                            "same-distance": None,
+                        },
+                        "url": object_name,
+                    }
+                elif vehicle["class_id"] == 13:
+                    event_info = {
+                        "event": "meta",
+                        "type": vehicle["class_label"],
+                        "isWarning": 1,
+                        "time": time_ms,
+                        "message": "未戴安全帽",
+                        "info": {
+                            "id": vehicle["target_id"],
+                            "lon": 125.16,
+                            "lat": 41.72,
+                            "distance": None,
+                            "same-distance": None,
+                        },
+                        "url": object_name,
+                    }
+                elif vehicle["class_id"] == 14:
+                    event_info = {
+                        "event": "meta",
+                        "type": vehicle["class_label"],
+                        "isWarning": 1,
+                        "time": time_ms,
+                        "message": "未穿反光背心",
+                        "info": {
+                            "id": vehicle["target_id"],
+                            "lon": 125.16,
+                            "lat": 41.72,
+                            "distance": None,
+                            "same-distance": None,
+                        },
+                        "url": object_name,
+                    }
+                elif vehicle["class_id"] == 15:
+                    event_info = {
+                        "event": "meta",
+                        "type": vehicle["class_label"],
+                        "isWarning": 1,
+                        "time": time_ms,
+                        "message": "未穿反光背心未戴安全帽",
+                        "info": {
+                            "id": vehicle["target_id"],
+                            "lon": 125.16,
+                            "lat": 41.72,
+                            "distance": None,
                             "same-distance": None,
                         },
                         "url": object_name,

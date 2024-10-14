@@ -15,7 +15,7 @@ stop_event_dict = {}
 def run_videotracker(data, stop_event):
     def wait_for_stop():
         stop_event.wait()
-        cap.release(tracker.stop_detection())
+        cap.release()
 
     tracker = VideoObjectTracker(
         model_path=MODEL_PATH,
@@ -40,7 +40,7 @@ def run_videotracker(data, stop_event):
     cap.process_thread.join()
     cap.receive_thread.join()
     wait_thread.join()
-    send_complete_message(data["flightId"])
+    send_complete_message(data["flightId"], tracker)
 
 
 def on_message(client, topic, payload, qos, properties):
@@ -60,11 +60,12 @@ def on_message(client, topic, payload, qos, properties):
             stop_event.set()
             del stop_event_dict[flight_id]
 
-def send_complete_message(flightId):
+def send_complete_message(flightId, tracker):
     topic = f"/ATS/yunying/task/ai/out/FLXJ"
     message = json.dumps({"flightId": flightId})
     try:
         client_handler.publish(topic, message)
+        tracker.stop_detection()
     except Exception as e:
         print(f"Failed to publish complete message: {e}")
 
