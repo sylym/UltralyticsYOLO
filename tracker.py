@@ -45,7 +45,7 @@ label_color = [
     ["FLA6", (153, 204, 255)],
     ["FLB1", (255, 102, 255)],
     ["FLB2", (255, 51, 255)],
-    ["FLB2", (255, 51, 255)],
+    ["FLB4", (255, 51, 255)],
     ["FLE1", (51, 153, 255)],
     ["FLE5", (255, 153, 153)],
     ["FLE3", (255, 153, 153)],
@@ -344,6 +344,7 @@ class VideoObjectTracker:
         cone_positions = []
         curr_vehicles = []
         else_vehicles = []
+        people_vehicles = []
         first_distances = self.first_distances
         outputs = self.model.process_frame(frame, slice_height=720, slice_width=720, class_mapping=class_mapping_dict)
         if outputs is None:
@@ -375,8 +376,6 @@ class VideoObjectTracker:
                     continue
             elif class_id == 0:
                 self.last_flc1_time = current_frame / fps
-            elif class_id == 16 and self.last_flc1_time > self.first_flf1_time:
-                self.first_flf1_time = current_frame / fps
 
             if target_id not in self.known_target_id[class_id].keys():
                 self.known_target_id[class_id][target_id] = len(
@@ -399,39 +398,75 @@ class VideoObjectTracker:
                     self.third_detection_time = current_frame / fps
                 if "FLB1" in class_label and self.forth_detection_time == 0 and center_y >= self.frame_height/2:
                     self.forth_detection_time = current_frame / fps
-
-                cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), color, 2)
-                if class_id == 0:
-                    curr_vehicles.append(
-                        {
-                            "target_id": target_id,
-                            "class_label": class_label,
-                            "class_id": class_id,
-                            "position": np.array(
-                                [(xmin + xmax) / 2, (ymin + ymax) / 2]
-                            ),
-                            "center_x": center_x,
-                            "center_y": center_y,
-                            "xmax": xmax,
-                            "ymax": ymax,
-                        }
-                    )
+                if "FLF1" in class_label and self.last_flc1_time > self.first_flf1_time and self.last_length == 0:
+                    self.first_flf1_time = current_frame / fps
+                if class_id == 0 and self.last_length == 0:
+                    self.last_flc1_time = current_frame / fps
+                # cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), color, 2)
+                if self.first_flf1_time > 0 and self.last_length > 0:
+                    curr_vehicles = []
+                    if class_id in [12, 13, 14, 15]:
+                        cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), color, 2)
+                        frame = cv2AddChineseText(frame, f"{CHNlabel} _ {target_id}", (xmin, ymin - 10), (255, 0, 0),
+                                                  10)
+                        else_vehicles.append(
+                            {
+                                "target_id": target_id,
+                                "class_label": class_label,
+                                "class_id": class_id,
+                                "position": np.array(
+                                    [(xmin + xmax) / 2, (ymin + ymax) / 2]
+                                ),
+                                "center_x": center_x,
+                                "center_y": center_y,
+                                "xmax": xmax,
+                                "ymax": ymax,
+                                "xmin": xmin,
+                                "ymin": ymin,
+                            }
+                        )
                 else:
-                    else_vehicles.append(
-                        {
-                            "target_id": target_id,
-                            "class_label": class_label,
-                            "class_id": class_id,
-                            "position": np.array(
-                                [(xmin + xmax) / 2, (ymin + ymax) / 2]
-                            ),
-                            "center_x": center_x,
-                            "center_y": center_y,
-                            "xmax": xmax,
-                            "ymax": ymax,
-                        }
-                    )
-                frame = cv2AddChineseText(frame, f"{CHNlabel} _ {target_id}", (xmin, ymin - 10), (255, 0, 0), 10)
+                    if class_id == 0:
+                        cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), color, 2)
+                        frame = cv2AddChineseText(frame, f"{CHNlabel} _ {target_id}", (xmin, ymin - 10), (255, 0, 0),
+                                                  10)
+                        curr_vehicles.append(
+                            {
+                                "target_id": target_id,
+                                "class_label": class_label,
+                                "class_id": class_id,
+                                "position": np.array(
+                                    [(xmin + xmax) / 2, (ymin + ymax) / 2]
+                                ),
+                                "center_x": center_x,
+                                "center_y": center_y,
+                                "xmax": xmax,
+                                "ymax": ymax,
+                                "xmin": xmin,
+                                "ymin": ymin,
+                            }
+                        )
+                    elif class_id not in [12, 13, 14, 15]:
+                        cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), color, 2)
+                        frame = cv2AddChineseText(frame, f"{CHNlabel} _ {target_id}", (xmin, ymin - 10), (255, 0, 0),
+                                                  10)
+                        else_vehicles.append(
+                            {
+                                "target_id": target_id,
+                                "class_label": class_label,
+                                "class_id": class_id,
+                                "position": np.array(
+                                    [(xmin + xmax) / 2, (ymin + ymax) / 2]
+                                ),
+                                "center_x": center_x,
+                                "center_y": center_y,
+                                "xmax": xmax,
+                                "ymax": ymax,
+                                "xmin": xmin,
+                                "ymin": ymin,
+                            }
+                        )
+                # frame = cv2AddChineseText(frame, f"{CHNlabel} _ {target_id}", (xmin, ymin - 10), (255, 0, 0), 10)
         curr_vehicles.sort(key=lambda v: v["center_y"])
         curr_vehicles = [v for v in curr_vehicles if v["center_y"] > frame_third]
         for i in range(len(else_vehicles)):
@@ -724,5 +759,7 @@ class VideoObjectTracker:
         self.second_detection_time = 0
         self.third_detection_time = 0
         self.forth_detection_time = 0
+        self.last_flc1_time = 0
+        self.first_flf1_time = 0
         self.next_id = 0
         print("Detection stopped.")
